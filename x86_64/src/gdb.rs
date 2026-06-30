@@ -237,17 +237,6 @@ fn phys_addr(mem: &GuestMemory, vaddr: u64, sregs: &Sregs) -> Result<(u64, u64)>
                 (curr_table_addr & PTE_ADDR_MASK) + page_table_offset(vaddr, level),
             ))
             .map_err(|_| Error::TranslatingVirtAddr)?;
-        /* TODO - convert to a trace
-        println!(
-            "level {} vaddr {:x} table-addr {:x} mask {:x} ent {:x} offset {:x}",
-            level,
-            vaddr,
-            curr_table_addr,
-            PTE_ADDR_MASK,
-            ent,
-            page_table_offset(vaddr, level)
-        );
-        */
         if ent & PAGE_PRESENT == 0 {
             return Err(Error::PageNotPresent);
         }
@@ -277,7 +266,7 @@ fn phys_addr(mem: &GuestMemory, vaddr: u64, sregs: &Sregs) -> Result<(u64, u64)>
     if sregs.efer & MSR_EFER_LMA != 0 {
         // TODO - check LA57
         if sregs.cr4 & CR4_LA57_MASK != 0 {
-            todo!("handle LA57");
+            return Err(Error::TranslatingVirtAddr);
         }
         let p4_ent = next_pte(mem, sregs.cr3, vaddr, 4)?;
         let p3_ent = next_pte(mem, p4_ent, vaddr, 3)?;
@@ -297,5 +286,14 @@ fn phys_addr(mem: &GuestMemory, vaddr: u64, sregs: &Sregs) -> Result<(u64, u64)>
         let paddr = p1_ent & PTE_ADDR_MASK | page_offset(vaddr, PAGE_SIZE_4K);
         return Ok((paddr, PAGE_SIZE_4K));
     }
-    Err(Error::TranslatingVirtAddr)
+
+    let p3_ent = next_pte(mem, sregs.cr3, vaddr, 3)?;
+    let p2_ent = next_pte(mem, p3_ent, vaddr, 2)?;
+    if p2_ent & PAGE_PSE_MASK != 0 {
+        let paddr = p2_ent & PTE_ADDR_MASK | page_offset(vaddr, PAGE_SIZE_2M);
+        return Ok((paddr, PAGE_SIZE_2M));
+    }
+    let p1_ent = next_pte(mem, p2_ent, vaddr, 1)?;
+    let paddr = p1_ent & PTE_ADDR_MASK | page_offset(vaddr, PAGE_SIZE_4K);
+    Ok((paddr, PAGE_SIZE_4K))
 }
